@@ -3,12 +3,10 @@ import sys
 import time
 import exchange_calendars as xcals
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+
 
 import pandas as pd
 from pykrx import stock
-
-KST = ZoneInfo("Asia/Seoul")
 
 pd.set_option("display.max_rows", 200)
 pd.set_option("display.max_columns", 50)
