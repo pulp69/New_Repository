@@ -41,43 +41,37 @@ def get_xkrx_calendar():
 
 def nearest_prev_business_day_local(date_str: str) -> str:
     cal = get_xkrx_calendar()
-    dt = pd.Timestamp(datetime.strptime(date_str, "%Y%m%d")).tz_localize("Asia/Seoul")
+    dt = pd.Timestamp(datetime.strptime(date_str, "%Y%m%d").date())
 
-    # 주어진 날짜보다 '이전'의 개장일 찾기
-    for i in range(1, 15):
-        probe = dt - pd.Timedelta(days=i)
-        if cal.is_session(probe.normalize()):
-            return probe.strftime("%Y%m%d")
+    # "직전 영업일"이어야 하므로 하루 먼저 빼고 previous 사용
+    dt = dt - pd.Timedelta(days=1)
 
-    raise RuntimeError(f"이전 영업일 계산 실패: {date_str}")
+    session = cal.date_to_session(dt, direction="previous")
+    return pd.Timestamp(session).strftime("%Y%m%d")
 
 
 def nearest_same_or_prev_business_day_local(date_str: str) -> str:
     cal = get_xkrx_calendar()
-    dt = pd.Timestamp(datetime.strptime(date_str, "%Y%m%d")).tz_localize("Asia/Seoul")
+    dt = pd.Timestamp(datetime.strptime(date_str, "%Y%m%d").date())
 
-    if cal.is_session(dt.normalize()):
+    if cal.is_session(dt):
         return dt.strftime("%Y%m%d")
 
-    for i in range(1, 15):
-        probe = dt - pd.Timedelta(days=i)
-        if cal.is_session(probe.normalize()):
-            return probe.strftime("%Y%m%d")
-
-    raise RuntimeError(f"당일/직전 영업일 계산 실패: {date_str}")
+    session = cal.date_to_session(dt, direction="previous")
+    return pd.Timestamp(session).strftime("%Y%m%d")
 
 
 def decide_target_date_kst():
-    now_kst = datetime.now(KST)
+    now_kst = datetime.now()
     cutoff_hour = 18
 
     if now_kst.hour < cutoff_hour:
         base_dt = now_kst - timedelta(days=1)
         mode = "PRE_CLOSE_USE_PREV"
-        target_date = nearest_prev_business_day_local(yyyymmdd(base_dt))
+        target_date = nearest_prev_business_day_local(base_dt.strftime("%Y%m%d"))
     else:
         mode = "POST_CLOSE_USE_SAME_OR_PREV"
-        target_date = nearest_same_or_prev_business_day_local(yyyymmdd(now_kst))
+        target_date = nearest_same_or_prev_business_day_local(now_kst.strftime("%Y%m%d"))
 
     return target_date, mode, now_kst
 
