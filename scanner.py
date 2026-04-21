@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import exchange_calendars as xcals
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -34,51 +35,36 @@ def retry_krx(func, *args, retries=4, delay=2, **kwargs):
                 time.sleep(delay * attempt)
     raise last_err
 
-
-def safe_get_index_ohlcv_by_date(fromdate: str, todate: str, ticker: str = "1001") -> pd.DataFrame:
-    try:
-        df = retry_krx(stock.get_index_ohlcv_by_date, fromdate, todate, ticker)
-        if df is None or df.empty:
-            return pd.DataFrame()
-        return df
-    except Exception as e:
-        log(f"[WARN] safe_get_index_ohlcv_by_date 실패: {fromdate}~{todate}, ticker={ticker}, err={e}")
-        return pd.DataFrame()
+def get_xkrx_calendar():
+    return xcals.get_calendar("XKRX")
 
 
-def nearest_prev_business_day_safe(date_str: str) -> str:
-    try:
-        day = retry_krx(stock.get_nearest_business_day_in_a_week, date_str, prev=True)
-        if day:
-            return day
-    except Exception as e:
-        log(f"[WARN] get_nearest_business_day_in_a_week 실패: {date_str} -> {e}")
+def nearest_prev_business_day_local(date_str: str) -> str:
+    cal = get_xkrx_calendar()
+    dt = pd.Timestamp(datetime.strptime(date_str, "%Y%m%d")).tz_localize("Asia/Seoul")
 
-    dt = datetime.strptime(date_str, "%Y%m%d")
-    for _ in range(14):
-        dt -= timedelta(days=1)
-        probe = dt.strftime("%Y%m%d")
-        df = safe_get_index_ohlcv_by_date(probe, probe, "1001")
-        if not df.empty:
-            log(f"[INFO] fallback 영업일 계산 성공: {date_str} -> {probe}")
-            return probe
+    # 주어진 날짜보다 '이전'의 개장일 찾기
+    for i in range(1, 15):
+        probe = dt - pd.Timedelta(days=i)
+        if cal.is_session(probe.normalize()):
+            return probe.strftime("%Y%m%d")
 
     raise RuntimeError(f"이전 영업일 계산 실패: {date_str}")
 
 
-def nearest_same_or_prev_business_day_safe(date_str: str) -> str:
-    try:
-        day = retry_krx(stock.get_nearest_business_day_in_a_week, date_str, prev=False)
-        if day == date_str:
-            return day
-    except Exception as e:
-        log(f"[WARN] same/prev 영업일 확인 실패: {date_str} -> {e}")
+def nearest_same_or_prev_business_day_local(date_str: str) -> str:
+    cal = get_xkrx_calendar()
+    dt = pd.Timestamp(datetime.strptime(date_str, "%Y%m%d")).tz_localize("Asia/Seoul")
 
-    df = safe_get_index_ohlcv_by_date(date_str, date_str, "1001")
-    if not df.empty:
-        return date_str
+    if cal.is_session(dt.normalize()):
+        return dt.strftime("%Y%m%d")
 
-    return nearest_prev_business_day_safe(date_str)
+    for i in range(1, 15):
+        probe = dt - pd.Timedelta(days=i)
+        if cal.is_session(probe.normalize()):
+            return probe.strftime("%Y%m%d")
+
+    raise RuntimeError(f"당일/직전 영업일 계산 실패: {date_str}")
 
 
 def decide_target_date_kst():
@@ -88,10 +74,10 @@ def decide_target_date_kst():
     if now_kst.hour < cutoff_hour:
         base_dt = now_kst - timedelta(days=1)
         mode = "PRE_CLOSE_USE_PREV"
-        target_date = nearest_prev_business_day_safe(yyyymmdd(base_dt))
+        target_date = nearest_prev_business_day_local(yyyymmdd(base_dt))
     else:
         mode = "POST_CLOSE_USE_SAME_OR_PREV"
-        target_date = nearest_same_or_prev_business_day_safe(yyyymmdd(now_kst))
+        target_date = nearest_same_or_prev_business_day_local(yyyymmdd(now_kst))
 
     return target_date, mode, now_kst
 
